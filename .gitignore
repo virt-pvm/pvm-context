@@ -1,0 +1,4 @@
+.artifacts/
+configs/*.local.env
+*.log
+*.pid
