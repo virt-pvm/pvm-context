@@ -1,0 +1,11 @@
+distribution=Amazon Linux 2023.12.20261016
+kernel_release=6.18.54-121.166.amzn2023.x86_64
+base=host-pvm-612-oot-pr29
+base_commit=d7518a5b7016186cce5f3f1951efb4ce347e6dc1
+source_export_commit=ede1a142ba4d941cbd61500bb11429531b1b7e76
+profile_commit=2b9f72fc59644b4eb3a0b7c976bff0045699438f
+profile=tools/pvm-oot/profiles/amazon-linux-2023-6.18.54-121.166/profile.json
+profile_sha256=60a81d87f9f0761940757c0b6e168d898993a28454bdc89c637707646a63121c
+official_image_sha256=b6174d02ae88732e0b596ed1cf840c0e5f2f492b8d539bb9255c70f92c3624a8
+source=https://cdn.amazonlinux.com/al2023/os-images/2023.12.20261016.0/kvm/
+host_boot_argument=nokaslr

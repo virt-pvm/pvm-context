@@ -1,0 +1,8 @@
+distribution=CentOS Stream 10
+kernel_release=6.12.0-267.el10.x86_64
+base=host-pvm-612-oot-pr29
+base_commit=3f8daf19fd3e5a7e7c9cbf987b7d6d1cc3cf79c2
+profile=tools/pvm-oot/profiles/centos-stream-10-6.12.0-267/profile.json
+profile_sha256=4889574d74e2e769c0f7dd720536fb88df145698d2ec7a672ca257b03219382b
+profile_commit=065363c7a4abd1389807ebc22a00f6c2223a4b22
+source=https://cloud.centos.org/centos/10-stream/x86_64/images/

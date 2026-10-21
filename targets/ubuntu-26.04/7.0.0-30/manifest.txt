@@ -1,0 +1,8 @@
+distribution=Ubuntu 26.04 LTS
+kernel_release=7.0.0-30-generic
+base=host-pvm-612-oot-pr29
+base_commit=d7518a5b7016186cce5f3f1951efb4ce347e6dc1
+source_export_commit=ede1a142ba4d941cbd61500bb11429531b1b7e76
+profile=tools/pvm-oot/profiles/ubuntu-7.0.0-30-generic/profile.json
+profile_sha256=056988c5081885719b8e8e9b35887269bbc82a10c8eb2c091a8ab3b6d4ea965a
+source=https://cloud-images.ubuntu.com/releases/26.04/release/

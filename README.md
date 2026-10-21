@@ -90,6 +90,37 @@ image. It detects either the `kvm_pvm` or PVM-backed `kvm_amd` module, waits for
 the guest to boot, and fails on host refcount warnings, kernel warnings, or an
 Oops. Set `PVM_MODULE` to override automatic module selection.
 
+## Distribution OOT RPM Profiles
+
+The `targets/<distribution>/<kernel>/` directories hold VM connection
+profiles and target pin manifests. OOT source and target-specific patches
+remain in the selected external 6.6 or 6.12 base repository; this context
+repository does not duplicate the Linux source tree. Follow
+`docs/oot-profile-patches.md` when updating those patches.
+
+To build, install, and smoke-test a pinned target from `dev`:
+
+```bash
+./build-ko-rpm.sh targets/centos-stream-10/6.12.0-267/config.sh
+```
+
+Use `PVM_ARTIFACT_DIR` to keep a new run separate from previously qualified
+RPMs. The profile supplies the VM login method, prepared source directory,
+target kernel, and post-install test. The guest-side build checks that the
+running kernel and GCC match the target build tree. When module BTF is
+enabled, it also checks the configured `pahole` version, prepares a BTF base
+from the running kernel if needed, and verifies BTF in both the built and
+installed modules. CentOS Stream 10 and Amazon Linux 2023 profiles can
+install `dwarves` from their official repositories when it is missing.
+
+The RPM and its SHA256 and build manifest are written to the profile's
+artifact directory. Tracked target manifests record only distribution,
+kernel, source, and profile pins. Keep per-run results and RPM checksums in
+ignored logs and artifact directories, not in tracked target manifests.
+Keep the prepared source aligned with the pinned profile before running the
+build. Current profiles cover Ubuntu 24.04,
+Ubuntu 26.04, CentOS Stream 10, Amazon Linux 2023, and Alibaba Cloud Linux 4.
+
 ## AI Helper Workflow
 
 `AGENTS.md` and `skills/` define the rules for AI-assisted PVM

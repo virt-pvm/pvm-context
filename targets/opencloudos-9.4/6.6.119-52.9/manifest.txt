@@ -1,0 +1,8 @@
+distribution=OpenCloudOS 9.4
+kernel_release=6.6.119-52.9.oc9.x86_64
+base=host-pvm-66-oot-pr29
+base_commit=2b93c344e689377881e4c41fa2ffa34b89b75b7c
+profile=tools/pvm-oot/profiles/opencloudos-9.4-6.6.119-52.9/profile.json
+profile_sha256=89509cb49c1c167b173a68edcc49d19524ca6718fae73f08a3380fd4154182b9
+profile_commit=5f26a002b19da3729b705f0d10ebe80b6e026579
+boot_requirement=nokaslr

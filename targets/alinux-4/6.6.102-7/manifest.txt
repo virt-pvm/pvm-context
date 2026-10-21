@@ -1,0 +1,8 @@
+distribution=Alibaba Cloud Linux 4
+kernel_release=6.6.102-7.alnx4.x86_64
+base=host-pvm-66-oot-pr29
+base_commit=81ef364558b11440e497cbc624ea3ece27196aa5
+profile=tools/pvm-oot/profiles/alinux-4-6.6.102-7/profile.json
+profile_sha256=471f908be129d2dc91c7bd0b7b30b8e75c0debac640e2fdcccba84269ac86e2f
+profile_commit=07e64c33618854e84046adfd0afc2320bcab8349
+source=https://alinux4.oss-cn-beijing.aliyuncs.com/images/
