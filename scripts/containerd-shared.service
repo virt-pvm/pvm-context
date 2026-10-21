@@ -1,0 +1,19 @@
+[Unit]
+Description=containerd from the PVM shared runtime disk
+RequiresMountsFor=/build
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/containerd --root /build/pvm-shared/state/containerd --state /run/containerd
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

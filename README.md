@@ -50,13 +50,33 @@ validated baseline.
 
 ## Automated Test Scripts
 
-The scripts in `scripts/` provide focused build and smoke-test automation after
-the selected PVM kernel or module is deployed:
+The Ubuntu 24.04 basic workflow keeps the context checkout as a controller and
+runs image creation, kernel builds, and virtualization tests on a separate KVM
+validation host. It downloads the official Ubuntu 24.04 cloud image, creates an
+independent shared build disk, installs Kata Containers, and builds the pinned
+6.6 and 6.12 host bases plus their matching PVM OOT modules.
+
+The runtime matrix covers direct Firecracker boot plus Kata runtime-rs with
+QEMU, Cloud Hypervisor, and Dragonball. Kata and Firecracker releases are
+pinned and checksum-verified; QEMU uses the supported q35 machine with qboot.
+Machine-specific host names, source paths, and local
+archives belong in the ignored `configs/ubuntu-24.04-basic.local.env` profile.
+See `docs/test-env.md` for prerequisites, profile examples, and phase commands.
+
+The scripts in `scripts/` also provide focused build and smoke-test automation
+after the selected PVM kernel or module is deployed:
 
 - target helpers prepare the VM, kernel source, and module build environment;
 - `firecracker-pvm-test.sh` validates the Firecracker PVM path and checks for
   host warnings, refcount warnings, Oopses, and guest boot failures;
 - environment and log helpers keep setup and failure collection repeatable.
+
+Run the complete remote workflow from the controller:
+
+```bash
+./scripts/test/run-on-validation-host.sh all \
+  configs/ubuntu-24.04-basic.local.env
+```
 
 After deploying the selected kernel or module, run the relevant validation
 script:
