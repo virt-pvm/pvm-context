@@ -19,6 +19,27 @@ rsync -a --delete \
   -e ssh "$ROOT_DIR/" "$PVM_VALIDATION_HOST:$PVM_REMOTE_ROOT/"
 scp "$PROFILE" "$PVM_VALIDATION_HOST:$remote_profile"
 
+if [[ -z "${PVM_GUEST_CONFIG:-}" ]]; then
+  local_guest_config="$ROOT_DIR/.artifacts/guest-config/selected.config"
+  PVM_GUEST_CONFIG_REPO_DIR="${PVM_CONTROL_GUEST_CONFIG_REPO_DIR:-}" \
+    "$ROOT_DIR/scripts/guest/resolve-guest-config.sh" \
+    "$local_guest_config" "${PVM_CONTROL_GUEST_CONFIG:-}"
+  remote_guest_config_dir="$PVM_REMOTE_ROOT/.artifacts/guest-config"
+  ssh "$PVM_VALIDATION_HOST" "mkdir -p '$remote_guest_config_dir'"
+  rsync -a -e ssh "$local_guest_config" "$local_guest_config.sha256" \
+    "$local_guest_config.source" "$PVM_VALIDATION_HOST:$remote_guest_config_dir/"
+fi
+
+dns_scripts_dir=${PVM_DNS_SCRIPTS_DIR:-"$ROOT_DIR/.artifacts/local-overrides/cubesandbox-dns"}
+[[ -d "$dns_scripts_dir" ]] || {
+  echo "CubeSandbox DNS overrides are missing: $dns_scripts_dir" >&2
+  exit 2
+}
+remote_dns_scripts_dir="$PVM_REMOTE_ROOT/.artifacts/local-overrides/cubesandbox-dns"
+ssh "$PVM_VALIDATION_HOST" "mkdir -p '$remote_dns_scripts_dir'"
+rsync -a --delete -e ssh "$dns_scripts_dir/" \
+  "$PVM_VALIDATION_HOST:$remote_dns_scripts_dir/"
+
 if [[ -n "$PVM_CONTROL_KATA_ARCHIVE" ]]; then
   [[ -f "$PVM_CONTROL_KATA_ARCHIVE" ]] || {
     echo "Kata archive is invalid: $PVM_CONTROL_KATA_ARCHIVE" >&2

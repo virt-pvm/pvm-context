@@ -120,6 +120,27 @@ has_shared_runtime() {
   vm_ssh 'test -x /build/pvm-shared/runtime/cubesandbox/Cubelet/bin/cubelet && test -d /build/pvm-shared/runtime/kata'
 }
 
+stage_dns_overrides() {
+  local source_dir=${PVM_DNS_SCRIPTS_DIR:-"$ROOT_DIR/.artifacts/local-overrides/cubesandbox-dns"}
+  local remote_dir=/build/pvm/context/.local-dns-overrides
+  local target_dir=/build/pvm-shared/runtime/cubesandbox/scripts/systemd
+  local name
+  local -a scripts=(coredns-start.sh coredns-postcheck.sh dns-host-route-up.sh)
+
+  for name in "${scripts[@]}"; do
+    [[ -f "$source_dir/$name" ]] || {
+      echo "CubeSandbox DNS override missing: $source_dir/$name" >&2
+      exit 2
+    }
+  done
+  vm_ssh "install -d -m 0755 '$remote_dir'"
+  tar -C "$source_dir" -czf - "${scripts[@]}" |
+    vm_ssh "tar -C '$remote_dir' -xzf -"
+  for name in "${scripts[@]}"; do
+    vm_ssh "test -f '$target_dir/common.sh' && sudo install -m 0755 '$remote_dir/$name' '$target_dir/$name' && cmp '$remote_dir/$name' '$target_dir/$name'"
+  done
+}
+
 attach_shared_runtime() {
   local start_services=${1:-0}
   local install_packages=${2:-0}
@@ -127,6 +148,7 @@ attach_shared_runtime() {
     echo "shared runtime assets are missing from PVM_SHARED_BASE" >&2
     exit 1
   }
+  stage_dns_overrides
   vm_ssh "sudo INSTALL_PACKAGES='$install_packages' START_SERVICES='$start_services' /build/pvm/context/scripts/attach-shared-runtime.sh"
 }
 
@@ -161,27 +183,37 @@ stage_firecracker() {
 }
 
 build_guest_kernel() {
-  local guest_config
+  local guest_config source_config source_id
   require_worktree PVM_GUEST_SOURCE "$PVM_GUEST_SOURCE_WORKTREE"
   vm_ssh 'mkdir -p /build/pvm/src/guest /build/pvm/configs'
   sync_tree "$PVM_GUEST_SOURCE_WORKTREE" /build/pvm/src/guest
   if [[ -n "$PVM_GUEST_CONFIG" ]]; then
-    [[ -f "$PVM_GUEST_CONFIG" ]] || {
-      echo "guest config not found: $PVM_GUEST_CONFIG" >&2
+    source_config=$PVM_GUEST_CONFIG
+  else
+    source_config="$ROOT_DIR/.artifacts/guest-config/selected.config"
+    if [[ ! -f "$source_config" ]]; then
+      "$ROOT_DIR/scripts/guest/resolve-guest-config.sh" "$source_config"
+    fi
+    # shellcheck source=/dev/null
+    source "$ROOT_DIR/pins/guest-config.env"
+    [[ -s "$source_config.source" ]] || {
+      echo "guest config provenance is missing: $source_config.source" >&2
       exit 2
     }
-    guest_config=/build/pvm/configs/kata-guest.config
-    vm_copy "$PVM_GUEST_CONFIG" "$REMOTE:$guest_config"
-  else
-    guest_config=$(vm_ssh "find /opt/kata/share/kata-containers -maxdepth 1 -type f -name 'config-*-dragonball-experimental' | sort -V | tail -n1")
-    if [[ -z "$guest_config" ]]; then
-      guest_config=$(vm_ssh "find /build/pvm-shared/artifacts/pvm-guest -type f -name 'config-*-pvm-kata*' 2>/dev/null | sort -V | tail -n1")
-    fi
-    [[ -n "$guest_config" ]] || {
-      echo "Kata/PVM guest kernel config is missing" >&2
-      exit 1
-    }
+    source_id=$(<"$source_config.source")
+    case "$source_id" in
+      "repo:$PVM_GUEST_CONFIG_COMMIT:$PVM_GUEST_CONFIG_PATH")
+        printf '%s  %s\n' "$PVM_GUEST_CONFIG_SHA256" "$source_config" | sha256sum -c -
+        ;;
+      override:*)
+        (cd "$(dirname -- "$source_config")" && sha256sum -c "$(basename -- "$source_config").sha256")
+        ;;
+      *) echo "stale guest config source: $source_id" >&2; exit 2 ;;
+    esac
   fi
+  [[ -f "$source_config" ]] || { echo "guest config not found: $source_config" >&2; exit 2; }
+  guest_config=/build/pvm/configs/kata-guest.config
+  vm_copy "$source_config" "$REMOTE:$guest_config"
   vm_ssh "sudo PVM_JOBS='$PVM_JOBS' /build/pvm/context/scripts/guest/build-guest-kernel.sh /build/pvm/src/guest '$guest_config'"
   vm_ssh 'sudo /build/pvm/context/scripts/kata/configure-pvm-runtime.sh'
 }

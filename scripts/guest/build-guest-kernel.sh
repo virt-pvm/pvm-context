@@ -31,6 +31,7 @@ printf '%s\n' "$kernel_release" > "$OUTPUT.uname"
 file "$OUTPUT"
 sha256sum "$OUTPUT" > "$ARTIFACT_DIR/guest-kernel.sha256"
 printf '%s\n' "source=$SOURCE_DIR" "kata_config=$KATA_CONFIG" \
+  "kata_config_sha256=$(sha256sum "$KATA_CONFIG" | awk '{print $1}')" \
   "kernel_release=$kernel_release" \
   "CONFIG_X86_PIE=y" \
   "CONFIG_PVM_GUEST=y" > "$ARTIFACT_DIR/guest-kernel.manifest"

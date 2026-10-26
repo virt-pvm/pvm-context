@@ -52,7 +52,18 @@ PVM_CONTROL_FIRECRACKER_ARCHIVE=/path/to/firecracker-v1.17.0-x86_64.tgz
 
 # Optional: stage a controller-side tree before running remotely.
 PVM_CONTROL_GUEST_SOURCE_WORKTREE="$ROOT_DIR/../guest"
+# Optional: read the pinned guest config from an existing misc clone.
+PVM_CONTROL_GUEST_CONFIG_REPO_DIR="$ROOT_DIR/../misc"
+# Optional: use a controller-local config instead of the repository pin.
+PVM_CONTROL_GUEST_CONFIG=/path/to/guest.config
 ```
+
+The default guest kernel config is pinned to a commit and SHA-256 in
+`pins/guest-config.env`. The controller copies it to the validation host before
+building the guest. Set `PVM_CONTROL_GUEST_CONFIG` for a controller-local file,
+or `PVM_GUEST_CONFIG` for a file already on the validation host. When neither is
+set, the pinned config is resolved from `virt-pvm/misc`; an existing clone may
+be provided with `PVM_CONTROL_GUEST_CONFIG_REPO_DIR`.
 
 The source worktrees may contain local changes. Their commit and dirty state
 are recorded before they are copied to the shared disk.
