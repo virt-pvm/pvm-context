@@ -9,13 +9,15 @@ PVM_REQUIRED_MODULES='kvm.ko kvm-pvm.ko'
 PVM_ARTIFACT_DIR=${PVM_ARTIFACT_DIR:-/root/pvm-artifacts-pr29/centos-stream-10/6.12.0-267}
 PVM_JOBS=${PVM_JOBS:-8}
 
-PVM_VM_PASSWORD=${PVM_VM_PASSWORD:-root}
 pvm_vm_exec() {
   local remote_command=$1 quoted_password quoted_command
+  : "${PVM_SSH_HOST:?set PVM_SSH_HOST in the local config}"
+  : "${PVM_VM_PORT:?set PVM_VM_PORT in the local config}"
+  : "${PVM_VM_PASSWORD:?set PVM_VM_PASSWORD in the local config}"
   printf -v quoted_password '%q' "$PVM_VM_PASSWORD"
   printf -v quoted_command '%q' "$remote_command"
-  ssh validation-host \
-    "sshpass -p $quoted_password ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 3338 root@127.0.0.1 $quoted_command"
+  ssh "$PVM_SSH_HOST" \
+    "sshpass -p $quoted_password ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $PVM_VM_PORT root@127.0.0.1 $quoted_command"
 }
 
 PVM_PREPARE_COMMAND='

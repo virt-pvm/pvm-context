@@ -10,12 +10,14 @@ PVM_ARTIFACT_DIR=${PVM_ARTIFACT_DIR:-/build/pvm/artifacts/rpm-pr29/ubuntu-24.04/
 PVM_CC=x86_64-linux-gnu-gcc-13
 PVM_JOBS=${PVM_JOBS:-8}
 
-PVM_VM_KEY=/path/on/validation-host/to/id_ed25519
 pvm_vm_exec() {
   local remote_command=$1 quoted_command
+  : "${PVM_SSH_HOST:?set PVM_SSH_HOST in the local config}"
+  : "${PVM_VM_PORT:?set PVM_VM_PORT in the local config}"
+  : "${PVM_VM_KEY:?set PVM_VM_KEY in the local config}"
   printf -v quoted_command '%q' "sudo -n env $remote_command"
-  ssh validation-host \
-    "ssh -i $PVM_VM_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 3336 pvm@127.0.0.1 $quoted_command"
+  ssh "$PVM_SSH_HOST" \
+    "ssh -i $PVM_VM_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $PVM_VM_PORT pvm@127.0.0.1 $quoted_command"
 }
 
 PVM_PREPARE_COMMAND='command -v x86_64-linux-gnu-gcc-13 >/dev/null && command -v make >/dev/null && command -v rpmbuild >/dev/null && command -v modprobe >/dev/null && test -d /lib/modules/6.8.0-139-generic/build'

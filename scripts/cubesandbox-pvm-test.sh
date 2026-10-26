@@ -7,6 +7,7 @@ API_URL="${API_URL:-http://127.0.0.1:3000}"
 IMAGE="${CUBE_TEMPLATE_IMAGE:-cube-sandbox-image.tencentcloudcr.com/opensource/redis:7-alpine}"
 LOG_DIR="${LOG_DIR:-$ROOT/logs/cubesandbox-test}"
 ENV_FILE="$ROOT/scripts/cubesandbox-template.env"
+CUBE_ENV_FILE="${CUBE_ENV_FILE:-$ROOT/runtime/cubesandbox/.one-click.env}"
 CREATED_TEMPLATE=""
 KEEP_TEMPLATE="${KEEP_TEMPLATE:-0}"
 
@@ -44,7 +45,7 @@ PY
 }
 
 check_environment() {
-  local module_path candidate
+  local module_path candidate expected_dns_ip actual_dns_ip s3lvol_enabled
   PVM_HOST_MODULE="${PVM_HOST_MODULE:-}"
   for candidate in "$PVM_HOST_MODULE" kvm_pvm kvm_amd; do
     [[ -n "$candidate" ]] || continue
@@ -65,10 +66,14 @@ check_environment() {
   [[ "$(modinfo -n "$PVM_HOST_MODULE")" == */updates/pvm-oot/* ]]
   [[ -c /dev/kvm ]]
   [[ "$(file -Lb /usr/local/services/cubetoolbox/cube-kernel-scf/vmlinux)" == ELF* ]]
-  [[ -S /var/run/s3lvol.sock ]] || {
-    echo "CubeSandbox s3lvol socket is unavailable" >&2
-    return 1
-  }
+  [[ -f "$CUBE_ENV_FILE" ]] || { echo "CubeSandbox env is missing: $CUBE_ENV_FILE" >&2; return 1; }
+  s3lvol_enabled=$(sed -n 's/^ONE_CLICK_ENABLE_S3LVOL=//p' "$CUBE_ENV_FILE" | head -n1)
+  if [[ "$s3lvol_enabled" != 0 ]]; then
+    [[ -S /var/run/s3lvol.sock ]] || {
+      echo "CubeSandbox s3lvol socket is unavailable" >&2
+      return 1
+    }
+  fi
   systemctl is-active --quiet cube-sandbox-cubelet.service || {
     echo "CubeSandbox cubelet service is not active" >&2
     return 1
@@ -79,6 +84,17 @@ check_environment() {
   }
   [[ -s /etc/cube/ca/cube-root-ca.crt ]] || {
     echo "CubeSandbox egress root CA is unavailable" >&2
+    return 1
+  }
+  expected_dns_ip=$(sed -n 's/^CUBE_SANDBOX_NODE_IP=//p' \
+    "$CUBE_ENV_FILE" | head -n1)
+  [[ -n "$expected_dns_ip" ]] || {
+    echo "CubeSandbox node IP is missing from .one-click.env" >&2
+    return 1
+  }
+  actual_dns_ip=$(getent ahostsv4 test.cube.app | awk 'NR == 1 {print $1}') || true
+  [[ "$actual_dns_ip" == "$expected_dns_ip" ]] || {
+    echo "CubeSandbox DNS resolved test.cube.app to '$actual_dns_ip', expected '$expected_dns_ip'" >&2
     return 1
   }
   curl -fsS "$API_URL/health" | tee "$LOG_DIR/health.json"
@@ -120,7 +136,10 @@ create_template() {
     phase="$(json_file_field "$LOG_DIR/template-status.json" job.phase)"
     echo "template=$template_id status=$status phase=$phase"
     [[ "$status" =~ ^(SUCCEEDED|SUCCESS|READY)$ ]] && break
-    [[ "$status" == FAILED ]] && return 1
+    if [[ "$status" == FAILED ]]; then
+      json_file_field "$LOG_DIR/template-status.json" job.error_message >&2
+      return 1
+    fi
     sleep 5
   done
   [[ "$status" =~ ^(SUCCEEDED|SUCCESS|READY)$ ]]

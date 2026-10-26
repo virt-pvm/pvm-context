@@ -13,11 +13,12 @@ PVM_ARTIFACT_DIR=${PVM_ARTIFACT_DIR:-/build/pvm-pr29/artifacts/amazon-linux-2023
 PVM_JOBS=${PVM_JOBS:-8}
 PVM_RESOLVE_BTFIDS=/build/pvm-pr29/artifacts/amazon-6.18-btf/resolve_btfids/resolve_btfids
 
-PVM_VM_KEY=${PVM_VM_KEY:-/path/on/validation-host/to/id_ed25519}
-PVM_VM_PORT=${PVM_VM_PORT:-3340}
 pvm_vm_exec() {
   local remote_command=$1
-  ssh validation-host \
+  : "${PVM_SSH_HOST:?set PVM_SSH_HOST in the local config}"
+  : "${PVM_VM_PORT:?set PVM_VM_PORT in the local config}"
+  : "${PVM_VM_KEY:?set PVM_VM_KEY in the local config}"
+  ssh "$PVM_SSH_HOST" \
     "ssh -i $PVM_VM_KEY -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $PVM_VM_PORT ec2-user@127.0.0.1 \"sudo -n bash -c '$remote_command'\""
 }
 

@@ -18,6 +18,11 @@ fi
 
 # shellcheck source=/dev/null
 source "$CONFIG"
+LOCAL_CONFIG=${PVM_LOCAL_CONFIG:-"$ROOT_DIR/configs/targets.local.env"}
+if [[ -f "$LOCAL_CONFIG" ]]; then
+  # shellcheck source=/dev/null
+  source "$LOCAL_CONFIG"
+fi
 if ! declare -F pvm_vm_exec >/dev/null; then
   echo "target config must define pvm_vm_exec()" >&2
   exit 2

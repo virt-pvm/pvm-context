@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+
+usage() {
+  echo "usage: $0 <distribution/kernel> [--env local.env] [--vm-only] [pvm-build options]" >&2
+  exit 2
+}
+
+[[ $# -gt 0 ]] || usage
+TARGET=$1
+shift
+LOCAL_CONFIG=${PVM_LOCAL_CONFIG:-"$ROOT_DIR/configs/targets.local.env"}
+VM_ONLY=0
+BUILD_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --env)
+      [[ $# -ge 2 ]] || usage
+      LOCAL_CONFIG=$2
+      shift 2
+      ;;
+    --vm-only)
+      VM_ONLY=1
+      shift
+      ;;
+    *)
+      BUILD_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ $TARGET == */config.sh ]]; then
+  CONFIG=$TARGET
+else
+  CONFIG="$ROOT_DIR/targets/$TARGET/config.sh"
+fi
+[[ -f $CONFIG ]] || { echo "unknown target: $TARGET" >&2; exit 2; }
+[[ -f $LOCAL_CONFIG ]] || { echo "local env not found: $LOCAL_CONFIG" >&2; exit 2; }
+CONFIG=$(cd -- "$(dirname -- "$CONFIG")" && pwd)/config.sh
+LOCAL_CONFIG=$(cd -- "$(dirname -- "$LOCAL_CONFIG")" && pwd)/$(basename -- "$LOCAL_CONFIG")
+
+# shellcheck source=/dev/null
+source "$CONFIG"
+PIN_TARGET=$PVM_TARGET_NAME
+PIN_KERNEL=$PVM_KERNEL_RELEASE
+# shellcheck source=/dev/null
+source "$LOCAL_CONFIG"
+[[ $PVM_TARGET_NAME == "$PIN_TARGET" && $PVM_KERNEL_RELEASE == "$PIN_KERNEL" ]] || {
+  echo "local env cannot override target/kernel pins" >&2
+  exit 2
+}
+# shellcheck source=../lib/vm-transport.sh
+source "$ROOT_DIR/lib/vm-transport.sh"
+# shellcheck source=../lib/vm-lifecycle.sh
+source "$ROOT_DIR/lib/vm-lifecycle.sh"
+
+pvm_vm_ensure "$ROOT_DIR"
+PVM_SHARED_MOUNT=${PVM_SHARED_MOUNT:-/build}
+PVM_VM_READY_TIMEOUT=${PVM_VM_READY_TIMEOUT:-180}
+[[ $PVM_VM_READY_TIMEOUT =~ ^[0-9]+$ ]] || { echo "invalid ready timeout" >&2; exit 2; }
+deadline=$((SECONDS + PVM_VM_READY_TIMEOUT))
+until pvm_vm_exec "test \"\$(uname -r)\" = '$PIN_KERNEL' && mountpoint -q '$PVM_SHARED_MOUNT'" >/dev/null 2>&1; do
+  if (( SECONDS >= deadline )); then
+    echo "VM did not become ready with kernel $PIN_KERNEL and mounted $PVM_SHARED_MOUNT" >&2
+    exit 1
+  fi
+  sleep 3
+done
+printf 'VM_READY target=%s kernel=%s shared_mount=%s\n' "$PIN_TARGET" "$PIN_KERNEL" "$PVM_SHARED_MOUNT"
+
+[[ $VM_ONLY == 1 ]] && exit 0
+exec "$ROOT_DIR/scripts/pvm-build" "$TARGET" --env "$LOCAL_CONFIG" "${BUILD_ARGS[@]}"

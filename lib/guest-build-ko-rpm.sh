@@ -11,6 +11,8 @@ decode_var PVM_KERNEL_RELEASE_B64 PVM_KERNEL_RELEASE
 decode_var PVM_SOURCE_DIR_B64 PVM_SOURCE_DIR
 decode_var PVM_BASE_NAME_B64 PVM_BASE_NAME
 decode_var PVM_BASE_COMMIT_B64 PVM_BASE_COMMIT
+if [[ -n ${PVM_PROFILE_SHA256_B64:-} ]]; then decode_var PVM_PROFILE_SHA256_B64 PVM_PROFILE_SHA256; fi
+if [[ -n ${PVM_BUILD_ONLY_B64:-} ]]; then decode_var PVM_BUILD_ONLY_B64 PVM_BUILD_ONLY; fi
 decode_var PVM_MODULE_SUBDIR_B64 PVM_MODULE_SUBDIR
 decode_var PVM_REQUIRED_MODULES_B64 PVM_REQUIRED_MODULES
 decode_var PVM_LOAD_MODULE_B64 PVM_LOAD_MODULE
@@ -42,6 +44,22 @@ KERNEL_BUILD="/lib/modules/$PVM_KERNEL_RELEASE/build"
 
 [[ -d "$MODULE_DIR" ]] || { echo "module source not found: $MODULE_DIR" >&2; exit 2; }
 [[ -d "$KERNEL_BUILD" ]] || { echo "kernel build tree not found: $KERNEL_BUILD" >&2; exit 2; }
+
+if [[ -n ${PVM_PROFILE_SHA256:-} ]]; then
+  python3 - "$PVM_SOURCE_DIR/.pvm-oot-prepared.json" "$PVM_BASE_COMMIT" "$PVM_PROFILE_SHA256" "$PVM_KERNEL_RELEASE" <<'PY'
+import json
+import sys
+
+path, base, profile, kernel = sys.argv[1:]
+with open(path, encoding="utf-8") as stream:
+    prepared = json.load(stream)
+actual = (prepared["source"]["commit"], prepared["profile_sha256"],
+          prepared["target"]["kernel_release"])
+expected = (base, profile, kernel)
+if actual != expected:
+    raise SystemExit(f"prepared source pin mismatch: actual={actual} expected={expected}")
+PY
+fi
 
 echo "== prepare: $PVM_TARGET_NAME ($PVM_KERNEL_RELEASE) =="
 bash -o pipefail -c "$PVM_PREPARE_COMMAND" </dev/null
@@ -118,7 +136,7 @@ read -r -a required_modules <<< "$PVM_REQUIRED_MODULES"
 for module in "${required_modules[@]}"; do
   [[ -s "$MODULE_DIR/$module" ]] || { echo "missing module: $MODULE_DIR/$module" >&2; exit 1; }
   if [[ "$btf_modules" == y ]]; then
-    readelf -S "$MODULE_DIR/$module" | grep -Eq '[[:space:]]\.BTF[[:space:]]' || {
+    readelf -S "$MODULE_DIR/$module" | grep -E '[[:space:]]\.BTF[[:space:]]' >/dev/null || {
       echo "module BTF is missing: $MODULE_DIR/$module" >&2
       exit 1
     }
@@ -201,6 +219,12 @@ install -m 0644 "$source_root/manifest.txt" "$PVM_ARTIFACT_DIR/$package_name.man
 rpm_path="$PVM_ARTIFACT_DIR/$(basename -- "$rpm_path")"
 sha256sum "$rpm_path" > "$rpm_path.sha256"
 rpm -qpl "$rpm_path"
+echo "PVM_OOT_RPM=$rpm_path"
+echo "PVM_OOT_MANIFEST=$PVM_ARTIFACT_DIR/$package_name.manifest.txt"
+
+if [[ ${PVM_BUILD_ONLY:-0} == 1 ]]; then
+  exit 0
+fi
 
 if [[ -z "$PVM_INSTALL_COMMAND" ]]; then
   PVM_INSTALL_COMMAND='rpm -Uvh --nodeps --replacepkgs "$rpm_path"'
@@ -218,7 +242,7 @@ if [[ "$btf_modules" == y ]]; then
   [[ -s "/sys/kernel/btf/$PVM_LOADED_MODULE" ]] || { echo "loaded module BTF is missing: $PVM_LOADED_MODULE" >&2; exit 1; }
   for module in "${required_modules[@]}"; do
     installed_module="/lib/modules/$PVM_KERNEL_RELEASE/updates/pvm-oot/$module"
-    readelf -S "$installed_module" | grep -Eq '[[:space:]]\.BTF[[:space:]]' || {
+    readelf -S "$installed_module" | grep -E '[[:space:]]\.BTF[[:space:]]' >/dev/null || {
       echo "installed module BTF is missing: $installed_module" >&2
       exit 1
     }

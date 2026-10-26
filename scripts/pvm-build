@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+usage() {
+  echo "usage: $0 <distribution/kernel|target-config.sh> [--env local.env] [--build-only|--test-only] [--rpm guest-rpm-path] [--module-only]" >&2
+  exit 2
+}
+
+[[ $# -gt 0 ]] || usage
+TARGET=$1
+shift
+MODE=all
+FULL_TEST=1
+LOCAL_CONFIG=${PVM_LOCAL_CONFIG:-"$ROOT_DIR/configs/targets.local.env"}
+REMOTE_RPM=
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --env) [[ $# -ge 2 ]] || usage; LOCAL_CONFIG=$2; shift 2 ;;
+    --build-only) MODE=build; shift ;;
+    --test-only) MODE=test; shift ;;
+    --rpm) [[ $# -ge 2 ]] || usage; REMOTE_RPM=$2; shift 2 ;;
+    --module-only) FULL_TEST=0; shift ;;
+    *) usage ;;
+  esac
+done
+if [[ $TARGET == */config.sh ]]; then
+  CONFIG=$TARGET
+else
+  CONFIG="$ROOT_DIR/targets/$TARGET/config.sh"
+fi
+[[ -f $CONFIG ]] || { echo "unknown target: $TARGET" >&2; exit 2; }
+CONFIG=$(cd -- "$(dirname -- "$CONFIG")" && pwd)/config.sh
+MANIFEST=${CONFIG%config.sh}manifest.txt
+[[ -f $MANIFEST ]] || { echo "target pin manifest is missing: $MANIFEST" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$CONFIG"
+PIN_TARGET=$PVM_TARGET_NAME
+PIN_KERNEL=$PVM_KERNEL_RELEASE
+PIN_BASE=$PVM_BASE_COMMIT
+PVM_PROFILE_SHA256=$(sed -n 's/^profile_sha256=//p' "$MANIFEST")
+PIN_PROFILE=$PVM_PROFILE_SHA256
+[[ $PVM_PROFILE_SHA256 =~ ^[a-f0-9]{64}$ ]] || { echo "invalid profile pin" >&2; exit 2; }
+[[ $(sed -n 's/^kernel_release=//p' "$MANIFEST") == "$PIN_KERNEL" ]] || { echo "kernel pin mismatch" >&2; exit 2; }
+[[ $(sed -n 's/^base_commit=//p' "$MANIFEST") == "$PIN_BASE" ]] || { echo "base pin mismatch" >&2; exit 2; }
+[[ -f $LOCAL_CONFIG ]] || { echo "local env not found: $LOCAL_CONFIG" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$LOCAL_CONFIG"
+[[ $PVM_TARGET_NAME == "$PIN_TARGET" && $PVM_KERNEL_RELEASE == "$PIN_KERNEL" &&
+   $PVM_BASE_COMMIT == "$PIN_BASE" && $PVM_PROFILE_SHA256 == "$PIN_PROFILE" ]] || {
+  echo "local env cannot override target/kernel/base/profile pins" >&2; exit 2;
+}
+# Overrides legacy target-specific connection functions.
+# shellcheck source=../lib/vm-transport.sh
+source "$ROOT_DIR/lib/vm-transport.sh"
+
+: "${PVM_TARGET_NAME:?}"
+: "${PVM_SOURCE_DIR:?}"
+: "${PVM_BASE_NAME:?}"
+: "${PVM_MODULE_SUBDIR:=arch/x86/kvm}"
+: "${PVM_REQUIRED_MODULES:=kvm.ko kvm-pvm.ko}"
+: "${PVM_LOAD_MODULE:=kvm_pvm}"
+: "${PVM_LOADED_MODULE:=kvm_pvm}"
+: "${PVM_MODULE_FILE:=kvm-pvm.ko}"
+: "${PVM_ARTIFACT_DIR:=/tmp/pvm-oot-rpms}"
+: "${PVM_JOBS:=8}"
+: "${PVM_PREPARE_COMMAND:=true}"
+: "${PVM_CC:=gcc}"
+: "${PVM_RESOLVE_BTFIDS:=}"
+: "${PVM_CLEAN_COMMAND:=}"
+: "${PVM_BUILD_COMMAND:=}"
+: "${PVM_INSTALL_COMMAND:=}"
+: "${PVM_POST_TEST_COMMAND:=true}"
+: "${PVM_POST_TEST_TIMEOUT:=900}"
+: "${PVM_KATA_CONFIG_DIR:=/etc/kata-containers/pvm}"
+: "${PVM_KATA_SHIM_OVERRIDE:=}"
+: "${PVM_CUBE_ENV_FILE:=/build/pvm-shared/runtime/cubesandbox/.one-click.env}"
+: "${PVM_CUBE_ROOT:=/build/pvm-shared}"
+
+encode() { printf '%s' "$1" | base64 | tr -d '\n'; }
+REMOTE_ENV=
+for name in PVM_TARGET_NAME PVM_KERNEL_RELEASE PVM_SOURCE_DIR PVM_BASE_NAME \
+  PVM_BASE_COMMIT PVM_PROFILE_SHA256 PVM_MODULE_SUBDIR PVM_REQUIRED_MODULES \
+  PVM_LOAD_MODULE PVM_LOADED_MODULE PVM_MODULE_FILE PVM_ARTIFACT_DIR \
+  PVM_JOBS PVM_PREPARE_COMMAND PVM_CC PVM_RESOLVE_BTFIDS \
+  PVM_CLEAN_COMMAND PVM_BUILD_COMMAND PVM_INSTALL_COMMAND \
+  PVM_POST_TEST_COMMAND PVM_POST_TEST_TIMEOUT; do
+  REMOTE_ENV+="${name}_B64=$(encode "${!name}") "
+done
+
+RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
+OUTPUT_DIR=${PVM_OUTPUT_DIR:-"$ROOT_DIR/.artifacts/rpm/$PVM_TARGET_NAME/$RUN_ID"}
+mkdir -p "$OUTPUT_DIR"
+printf 'target=%s kernel=%s mode=%s output=%s\n' "$PVM_TARGET_NAME" "$PVM_KERNEL_RELEASE" "$MODE" "$OUTPUT_DIR"
+
+if [[ $MODE != test ]]; then
+  PVM_BUILD_ONLY_B64=$(encode "1")
+  pvm_vm_exec "$REMOTE_ENV PVM_BUILD_ONLY_B64=$PVM_BUILD_ONLY_B64 bash -s" \
+    < "$ROOT_DIR/lib/guest-build-ko-rpm.sh" 2>&1 | tee "$OUTPUT_DIR/build.log"
+  REMOTE_RPM=$(sed -n 's/^PVM_OOT_RPM=//p' "$OUTPUT_DIR/build.log" | tail -n 1)
+  REMOTE_MANIFEST=$(sed -n 's/^PVM_OOT_MANIFEST=//p' "$OUTPUT_DIR/build.log" | tail -n 1)
+  [[ -n $REMOTE_RPM ]] || { echo "build did not report an RPM" >&2; exit 1; }
+  [[ $REMOTE_RPM == "$PVM_ARTIFACT_DIR/"*.rpm ]] || { echo "unexpected RPM path" >&2; exit 1; }
+  [[ $REMOTE_MANIFEST == "$PVM_ARTIFACT_DIR/"*.manifest.txt ]] || {
+    echo "build did not report a manifest" >&2; exit 1;
+  }
+  RPM_NAME=${REMOTE_RPM##*/}
+  pvm_vm_exec "cat $(printf '%q' "$REMOTE_RPM")" > "$OUTPUT_DIR/$RPM_NAME"
+  pvm_vm_exec "cat $(printf '%q' "$REMOTE_RPM.sha256")" > "$OUTPUT_DIR/$RPM_NAME.sha256"
+  pvm_vm_exec "cat $(printf '%q' "$REMOTE_MANIFEST")" > "$OUTPUT_DIR/$RPM_NAME.manifest.txt"
+  expected_sha=$(cut -d ' ' -f 1 "$OUTPUT_DIR/$RPM_NAME.sha256")
+  actual_sha=$(sha256sum "$OUTPUT_DIR/$RPM_NAME" | cut -d ' ' -f 1)
+  [[ $expected_sha == "$actual_sha" ]] || { echo "RPM SHA256 mismatch after collection" >&2; exit 1; }
+  printf '%s\n' "$REMOTE_RPM" > "$OUTPUT_DIR/remote-rpm.path"
+fi
+if [[ $MODE != build ]]; then
+  [[ -n $REMOTE_RPM ]] || { echo "--test-only requires --rpm <guest-rpm-path>" >&2; exit 2; }
+  RPM_B64=$(encode "$REMOTE_RPM")
+  pvm_vm_exec "$REMOTE_ENV PVM_RPM_PATH_B64=$RPM_B64 bash -s" \
+    < "$ROOT_DIR/lib/guest-test-ko-rpm.sh" 2>&1 | tee "$OUTPUT_DIR/test.log"
+  if [[ $FULL_TEST == 1 ]]; then
+    REMOTE_TEST_DIR="/tmp/pvm-fulltest-$RUN_ID"
+    printf -v quoted_test_dir '%q' "$REMOTE_TEST_DIR"
+    tar -C "$ROOT_DIR" -cf - scripts/kata-pvm-test-all.sh \
+      scripts/kata-pvm-oci-test.sh scripts/cubesandbox-pvm-test.sh |
+      pvm_vm_exec "mkdir -p $quoted_test_dir && tar -C $quoted_test_dir -xf -"
+    printf -v quoted_kata_config '%q' "$PVM_KATA_CONFIG_DIR"
+    printf -v quoted_cube_env '%q' "$PVM_CUBE_ENV_FILE"
+    printf -v quoted_cube_root '%q' "$PVM_CUBE_ROOT"
+    printf -v quoted_cube_log '%q' "$REMOTE_TEST_DIR/cube-logs"
+    printf '== Kata QEMU, Dragonball, Cloud Hypervisor ==\n'
+    full_status=0
+    kata_command="KATA_CONFIG_DIR=$quoted_kata_config bash $quoted_test_dir/scripts/kata-pvm-test-all.sh all"
+    if [[ -n $PVM_KATA_SHIM_OVERRIDE ]]; then
+      printf -v quoted_shim '%q' "$PVM_KATA_SHIM_OVERRIDE"
+      kata_command="test -x $quoted_shim || exit 1; mount --bind $quoted_shim /usr/bin/containerd-shim-kata-v2 || exit 1; trap 'umount /usr/bin/containerd-shim-kata-v2' EXIT; $kata_command"
+    fi
+    if ! pvm_vm_exec "$kata_command" \
+      2>&1 | tee "$OUTPUT_DIR/kata.log"; then
+      full_status=1
+    fi
+    printf '== CubeSandbox template and restore ==\n'
+    if ! pvm_vm_exec "PVM_SHARED_ROOT=$quoted_cube_root CUBE_ENV_FILE=$quoted_cube_env LOG_DIR=$quoted_cube_log bash $quoted_test_dir/scripts/cubesandbox-pvm-test.sh all" \
+      2>&1 | tee "$OUTPUT_DIR/cube.log"; then
+      full_status=1
+    fi
+    if [[ $full_status != 0 ]]; then
+      echo 'PVM_FULL_TEST=FAIL' >&2
+      exit "$full_status"
+    fi
+    printf 'PVM_FULL_TEST=PASS\n'
+  fi
+fi
+printf 'PVM_OUTPUT_DIR=%s\n' "$OUTPUT_DIR"
