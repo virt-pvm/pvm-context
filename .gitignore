@@ -2,3 +2,4 @@
 configs/*.local.env
 *.log
 *.pid
+__pycache__/
