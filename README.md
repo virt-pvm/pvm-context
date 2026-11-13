@@ -63,6 +63,10 @@ already prepared VM. Generated packages and results stay in `.artifacts/`.
 The GitHub workflows separate static checks (`checks.yml`), manual image
 preparation (`prepare-images.yml`), and manual full qualification (`rpm-test.yml`).
 
+Run `release.yml` to read fixed source pins from the latest two OOT branch
+profiles, build and fully test all targets, then publish RPMs, checksums and
+a manifest with changes since the previous release. No commit input is required.
+
 Setup details: [image preparation](docs/image-factory.md),
 [self-hosted CI](docs/self-hosted-ci.md), and
 [OOT adaptation rules](docs/oot-profile-patches.md).

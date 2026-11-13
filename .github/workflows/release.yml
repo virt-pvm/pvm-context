@@ -1,0 +1,106 @@
+name: PVM OOT release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional release tag (blank generates one automatically)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# Shares the VM/port boundary with image preparation and ordinary RPM tests.
+concurrency:
+  group: pvm-factory
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.freeze.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: freeze
+        name: Freeze both branch tips and previous release history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PVM_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 tools/pvm-release.py snapshot --output release-plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-plan.json
+          if-no-files-found: error
+          retention-days: 14
+  build:
+    needs: snapshot
+    environment: pvm-validation
+    runs-on: [self-hosted, linux, x64, pvm]
+    timeout-minutes: 540
+    outputs:
+      assets_artifact_id: ${{ steps.upload_assets.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-plan
+      - name: Build and fully qualify all distributions
+        env:
+          PVM_FACTORY_CONFIG_DIR: ${{ vars.PVM_FACTORY_CONFIG_DIR }}
+          RELEASE_WORKSPACE: ${{ runner.temp }}/pvm-release-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          test -n "$PVM_FACTORY_CONFIG_DIR"
+          python3 tools/pvm-release.py build \
+            --plan .artifacts/release-plan/release-plan.json \
+            --workspace "$RELEASE_WORKSPACE" --env-dir "$PVM_FACTORY_CONFIG_DIR"
+      - id: upload_assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pvm-release-${{ github.run_id }}-${{ github.run_attempt }}/assets/
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: [snapshot, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.build.outputs.assets_artifact_id }}
+          merge-multiple: true
+          path: assets
+      - name: Publish verified assets without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.snapshot.outputs.tag }}
+          CONTEXT_SHA: ${{ github.sha }}
+        run: |
+          cd assets
+          sha256sum --check SHA256SUMS
+          # Atomic creation refuses a tag created after the snapshot check too.
+          gh api --method POST "repos/$GH_REPO/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$CONTEXT_SHA" >/dev/null
+          # Create a draft first: an upload failure never publishes a partial release.
+          gh release create "$RELEASE_TAG" --draft --verify-tag --target "$CONTEXT_SHA" \
+            --title "$RELEASE_TAG" --notes-file release-notes.md \
+            ./*.rpm SHA256SUMS release-manifest.json release-notes.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest

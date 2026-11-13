@@ -53,15 +53,16 @@ template, and cleans it up. Run logs and results live in ignored
 
 ## GitHub integration
 
-The three independent workflows are:
+The workflows are:
 
 | Workflow | Trigger | Work |
 | --- | --- | --- |
 | `checks.yml` | Push, pull request, manual | Shell syntax, target pins, unit tests |
 | `prepare-images.yml` | Manual, default branch | Prepare or reuse sealed vendor images |
 | `rpm-test.yml` | Manual, default branch | Reuse images, build RPMs, run every runtime gate |
+| `release.yml` | Manual, default branch | Freeze latest OOT heads, qualify all targets, publish RPMs |
 
-Both manual workflows accept a single `target` or `all`. The matrix is
+Image preparation and RPM testing accept a single `target` or `all`. The matrix is
 resolved from checked-in manifests by `tools/ci-matrix.py`; unknown targets
 fail before any VM starts. Update the choice menus when adding a target.
 Configure the protected `pvm-validation` environment and its
@@ -77,8 +78,8 @@ RPM testing always calls `run`, never `prepare` or `all`, and has no reduced
 test mode. It uploads only the selected target's ignored RPM/test artifacts;
 images, private env files, SSH keys, and local DNS helpers are not uploaded.
 
-The two manual workflows share workflow-level concurrency group `pvm-factory`
-and run their matrices serially. This prevents preparation and qualification
+All VM workflows share workflow-level concurrency group `pvm-factory`
+and run targets serially. This prevents preparation, qualification and release
 from competing for a site's fixed forwarded port. Running jobs are not
 cancelled by a new dispatch. This is not a FIFO queue: GitHub may replace a
 pending run with a newer pending run. Do not dispatch multiple pending batches
@@ -114,3 +115,52 @@ Every source update must prepare a fresh tree from an explicit source SHA
 and matching profile before the RPM command. Validate that the source tested
 is the source requested. Qualify and review workflow changes before publishing
 them to GitHub.
+
+## One-click release
+
+Run `PVM OOT release` on the default branch; no source SHA input is needed.
+Optionally enter `release_tag`, such as `v0.1.0` or `pvm-oot-v0.1.0`; leaving
+it blank generates a tag automatically. Names may contain letters, digits,
+dots, underscores and hyphens, must start with a letter or digit, and must
+be valid under the checked naming rules. Existing tags are rejected before
+building and atomically refused at publication; they are never overwritten.
+It resolves `virt-pvm/linux` branches `pvm-6.6-host-oot` and
+`pvm-6.12-host-oot` once, then uses those exact commits throughout the run.
+The frozen branch commits select the profiles and preparation tools, not the
+source version to build. Each kernel-owned profile supplies its fixed
+`source.commit`, source fingerprint, target headers, compiler requirements and
+complete patch series. The release uses these pins verbatim, without rewriting
+the profile or dropping already-applied patches. Missing source commits,
+fingerprint mismatches and patch conflicts fail; maintainers must fix the
+profiles in the kernel repository. Release provenance records both the branch
+commit that supplies the profile and the actual pinned source commit.
+
+The protected build job uses `PVM_FACTORY_CONFIG_DIR` and existing sealed
+images on the validation host. It generates a private temporary context and
+target pins, without committing or altering the checked-in manifests. Factory
+envs must select `PVM_FACTORY_HOST=local`. All targets run serially through the
+same `pvm-ci run` gates, including persisted-template restore. Runtime binaries
+are reused and their backing-disk SHA256 is recorded; they are not updated by
+the release. Failures stop publication; diagnose them in the job logs and
+retained host-side artifacts.
+
+Only after every target passes does a hosted job receive `contents: write`.
+It verifies checksums, creates a draft, uploads the tested RPMs and public
+`release-manifest.json`/`SHA256SUMS`, and publishes the draft automatically.
+No private envs, full logs, keys or VM disks are released. The generated tag is
+`pvm-oot-<UTC date>-<run ID>-<attempt>`; generated and manual tags both point
+to the context commit. An upload failure can leave a tag and draft for
+inspection, never a published partial release. Existing tags/assets are not
+overwritten; use a new manual tag on retry, or leave the input blank for a
+new attempt suffix.
+
+The snapshot job reads the most recently published non-prerelease PVM release
+and its manifest. Each OOT line records previous/current SHAs, added commits,
+removed commits for rewritten history, and a compare link. First releases and
+unchanged branches are explicit. A missing prior manifest or inaccessible old
+commit fails the release rather than silently dropping history. Release notes
+contain the same summaries. These comparisons describe profile/tooling branch
+history; actual source pins are recorded per target. Linux Git fetches run
+on the validation host; no personal token or SSH deploy key is required for
+that public repository. The validation host still needs connectivity to
+GitHub Actions and artifact storage.
