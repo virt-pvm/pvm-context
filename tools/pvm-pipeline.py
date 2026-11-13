@@ -458,6 +458,7 @@ with os.fdopen(fd, 'wb') as output:
         (output / 'provenance.json').write_text(json.dumps({
             'format': 1, 'target': self.target, 'image_recipe_sha256': record['recipe_sha256'],
             'source_bundle_sha256': self.bundle_sha, 'profile_sha256': self.pin['profile_sha256'],
+            'runtime_sha256': record['runtime_sha256'],
             'base_commit': self.pin['base_commit'], 'full_test': 'PASS',
             'dns_helpers_sha256': self.dns_helper_sha256,
         }, indent=2, sort_keys=True) + '\n')
