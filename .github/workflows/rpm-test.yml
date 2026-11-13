@@ -1,0 +1,75 @@
+name: PVM OOT RPM and full tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Distribution kernel target
+        type: choice
+        default: all
+        options:
+          - all
+          - ubuntu-24.04/6.8.0-139
+          - ubuntu-26.04/7.0.0-30
+          - centos-stream-10/6.12.0-267
+          - amazon-linux-2023/6.18.54-121.166
+          - alinux-4/6.6.102-7
+          - opencloudos-9.4/6.6.119-52.9
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: pvm-factory
+  cancel-in-progress: false
+
+jobs:
+  select:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: targets
+        env:
+          PVM_TARGET: ${{ inputs.target }}
+        run: |
+          matrix=$(python3 tools/ci-matrix.py "$PVM_TARGET")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  test:
+    needs: select
+    environment: pvm-validation
+    runs-on: [self-hosted, linux, x64, pvm]
+    timeout-minutes: 90
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: run
+        name: Build RPM and run complete qualification
+        env:
+          PVM_FACTORY_CONFIG_DIR: ${{ vars.PVM_FACTORY_CONFIG_DIR }}
+          PVM_TARGET: ${{ matrix.target }}
+        run: |
+          test -n "$PVM_FACTORY_CONFIG_DIR"
+          tag=${PVM_TARGET//\//-}
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          config="$PVM_FACTORY_CONFIG_DIR/$tag.env"
+          test -f "$config"
+          ./scripts/pvm-ci run "$PVM_TARGET" --env "$config"
+      - name: Save target RPM and qualification results only
+        if: always() && steps.run.outputs.tag != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: pvm-${{ steps.run.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/pipeline/${{ steps.run.outputs.tag }}/
+          retention-days: 14
+          if-no-files-found: warn

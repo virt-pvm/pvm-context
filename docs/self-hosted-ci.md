@@ -53,12 +53,62 @@ template, and cleans it up. Run logs and results live in ignored
 
 ## GitHub integration
 
+The three independent workflows are:
+
+| Workflow | Trigger | Work |
+| --- | --- | --- |
+| `checks.yml` | Push, pull request, manual | Shell syntax, target pins, unit tests |
+| `prepare-images.yml` | Manual, default branch | Prepare or reuse sealed vendor images |
+| `rpm-test.yml` | Manual, default branch | Reuse images, build RPMs, run every runtime gate |
+
+Both manual workflows accept a single `target` or `all`. The matrix is
+resolved from checked-in manifests by `tools/ci-matrix.py`; unknown targets
+fail before any VM starts. Update the choice menus when adding a target.
+Configure the protected `pvm-validation` environment and its
+`PVM_FACTORY_CONFIG_DIR` variable. Each target resolves an external env named
+`<distribution>-<kernel>.env` in that directory. Do not store real bindings or
+credentials in workflow YAML.
+
+Image preparation's `force` boolean maps to `scripts/pvm-ci prepare ... --force`.
+Without it, a checksum-verified image with a matching recipe is reused.
+Forced preparation creates a new candidate and publishes it only after
+verification; it never deletes the previous image or its backing chain.
+RPM testing always calls `run`, never `prepare` or `all`, and has no reduced
+test mode. It uploads only the selected target's ignored RPM/test artifacts;
+images, private env files, SSH keys, and local DNS helpers are not uploaded.
+
+The two manual workflows share workflow-level concurrency group `pvm-factory`
+and run their matrices serially. This prevents preparation and qualification
+from competing for a site's fixed forwarded port. Running jobs are not
+cancelled by a new dispatch. This is not a FIFO queue: GitHub may replace a
+pending run with a newer pending run. Do not dispatch multiple pending batches
+when every batch must be retained.
+
+Host-side validation can lint the YAML and execute its `run` blocks with
+external env bindings, including real VM preparation and complete tests. It
+does not validate GitHub dispatch, runner scheduling, environment approvals,
+checkout, or artifact upload. Those require a registered runner and published
+workflow; keep that distinction explicit until GitHub execution is verified.
+
+Before publishing, validate the workflow expressions and runner labels with
+`actionlint -config-file .github/actionlint.yaml .github/workflows/*.yml`.
+The generic `pvm` capability label is declared there; hostnames and addresses
+remain in external SSH/env configuration.
+
 Register a dedicated runner only after these commands work directly on the
 deployed environment. Keep credentials and machine bindings outside the
 checkout. Initially run the target matrix serially with a protected manual
 trigger. Increase parallelism only with separate runner slots and independent
 VM overlays. Use workflow-level concurrency to avoid dropping pending matrix
 jobs that share one job-level concurrency group.
+
+On a systemd host, run the registered runner through its supplied service
+wrapper, not an interactive SSH terminal. From the runner directory, run
+`sudo ./svc.sh install <runner-user>` once, then `sudo ./svc.sh start` and
+`sudo ./svc.sh status`. Installation enables startup at boot. Select the
+dedicated runner account deliberately; an existing root runner may use
+`root` explicitly. Stop any manually started listener before starting the
+service, and verify that it reports `Listening for Jobs`.
 
 Every source update must prepare a fresh tree from an explicit source SHA
 and matching profile before the RPM command. Validate that the source tested

@@ -117,8 +117,12 @@ the external inputs, and run `prepare` manually before enabling the workflow.
 The Action should call `run`, not recreate or update the OS on every commit.
 Use protected environments and trusted branches only: these scripts execute
 privileged VM commands. Do not run untrusted pull-request code on this runner.
-Read `docs/self-hosted-ci.md` for runner deployment and artifact boundaries.
-Publishing workflows and registering a runner are separate deployment steps.
+Use `prepare-images.yml` for manual image maintenance and `rpm-test.yml` for
+manual complete qualification. Both support a single target or all manifests;
+only image preparation exposes a force-rebuild option. `checks.yml` handles
+push/PR static checks separately. Read `docs/self-hosted-ci.md` for runner,
+concurrency, and artifact boundaries. Publishing workflows and registering
+a runner are separate deployment steps.
 
 The image catalog is configuration, not proof that every fresh-image path is
 qualified. Keep actual validation results in ignored artifacts, not here or

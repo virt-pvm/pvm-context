@@ -1,0 +1,27 @@
+name: PVM OOT checks
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax, target pins, and unit tests
+        run: |
+          find scripts lib targets -type f \( -name '*.sh' -o -name 'config.sh' -o -name 'pvm-build' -o -name 'pvm-test' -o -name 'pvm-ci' -o -name 'pvm-reboot-restore' \) -print0 |
+            xargs -0 -r -n 1 bash -n
+          bash -n build-ko-rpm.sh
+          python3 tools/check-targets.py
+          python3 -m unittest discover -s tests -v
