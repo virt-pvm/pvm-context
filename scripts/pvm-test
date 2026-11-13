@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 usage() {
-  echo "usage: $0 <distribution/kernel> [--env local.env] [--vm-only] [pvm-build options]" >&2
+  echo "usage: $0 <distribution/kernel> [--env local.env] [--vm-only|--reboot-restore] [pvm-build options]" >&2
   exit 2
 }
 
@@ -13,6 +13,7 @@ TARGET=$1
 shift
 LOCAL_CONFIG=${PVM_LOCAL_CONFIG:-"$ROOT_DIR/configs/targets.local.env"}
 VM_ONLY=0
+REBOOT_RESTORE=0
 BUILD_ARGS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -25,12 +26,23 @@ while [[ $# -gt 0 ]]; do
       VM_ONLY=1
       shift
       ;;
+    --reboot-restore)
+      REBOOT_RESTORE=1
+      shift
+      ;;
     *)
       BUILD_ARGS+=("$1")
       shift
       ;;
   esac
 done
+
+if [[ $REBOOT_RESTORE == 1 ]]; then
+  [[ $VM_ONLY == 0 ]] || usage
+  for arg in "${BUILD_ARGS[@]}"; do
+    [[ $arg != --build-only && $arg != --module-only ]] || usage
+  done
+fi
 
 if [[ $TARGET == */config.sh ]]; then
   CONFIG=$TARGET
@@ -72,4 +84,8 @@ done
 printf 'VM_READY target=%s kernel=%s shared_mount=%s\n' "$PIN_TARGET" "$PIN_KERNEL" "$PVM_SHARED_MOUNT"
 
 [[ $VM_ONLY == 1 ]] && exit 0
+if [[ $REBOOT_RESTORE == 1 ]]; then
+  "$ROOT_DIR/scripts/pvm-build" "$TARGET" --env "$LOCAL_CONFIG" "${BUILD_ARGS[@]}"
+  exec "$ROOT_DIR/scripts/pvm-reboot-restore" "$TARGET" --env "$LOCAL_CONFIG"
+fi
 exec "$ROOT_DIR/scripts/pvm-build" "$TARGET" --env "$LOCAL_CONFIG" "${BUILD_ARGS[@]}"

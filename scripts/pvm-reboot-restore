@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+usage() {
+  echo "usage: $0 <distribution/kernel> [--env local.env]" >&2
+  exit 2
+}
+[[ $# -gt 0 ]] || usage
+TARGET=$1
+shift
+LOCAL_CONFIG=${PVM_LOCAL_CONFIG:-"$ROOT_DIR/configs/targets.local.env"}
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --env) [[ $# -ge 2 ]] || usage; LOCAL_CONFIG=$2; shift 2 ;;
+    *) usage ;;
+  esac
+done
+CONFIG="$ROOT_DIR/targets/$TARGET/config.sh"
+[[ -f $CONFIG && -f $LOCAL_CONFIG ]] || usage
+LOCAL_CONFIG=$(cd -- "$(dirname -- "$LOCAL_CONFIG")" && pwd)/$(basename -- "$LOCAL_CONFIG")
+source "$CONFIG"
+PIN_TARGET=$PVM_TARGET_NAME
+PIN_KERNEL=$PVM_KERNEL_RELEASE
+source "$LOCAL_CONFIG"
+[[ $PVM_TARGET_NAME == "$PIN_TARGET" && $PVM_KERNEL_RELEASE == "$PIN_KERNEL" ]] || {
+  echo "local env cannot override target/kernel pins" >&2
+  exit 2
+}
+source "$ROOT_DIR/lib/vm-transport.sh"
+source "$ROOT_DIR/lib/vm-lifecycle.sh"
+"$ROOT_DIR/scripts/pvm-test" "$TARGET" --env "$LOCAL_CONFIG" --vm-only
+
+RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
+OUTPUT_DIR=${PVM_REBOOT_OUTPUT_DIR:-"$ROOT_DIR/.artifacts/reboot-restore/$PIN_TARGET/$RUN_ID"}
+REMOTE_DIR="/var/tmp/pvm-reboot-restore-$RUN_ID"
+mkdir -p "$OUTPUT_DIR"
+printf -v remote_q '%q' "$REMOTE_DIR"
+tar -C "$ROOT_DIR" -cf - scripts/cubesandbox-pvm-test.sh |
+  pvm_vm_exec "mkdir -p $remote_q && tar -C $remote_q -xf -"
+printf -v root_q '%q' "${PVM_CUBE_ROOT:-/build/pvm-shared}"
+printf -v env_q '%q' "${PVM_CUBE_ENV_FILE:-/build/pvm-shared/runtime/cubesandbox/.one-click.env}"
+cube_command="PVM_SHARED_ROOT=$root_q CUBE_ENV_FILE=$env_q LOG_DIR=$remote_q/logs bash $remote_q/scripts/cubesandbox-pvm-test.sh"
+boot_before=$(pvm_vm_exec 'cat /proc/sys/kernel/random/boot_id')
+printf '%s\n' "$boot_before" > "$OUTPUT_DIR/boot-before"
+pvm_vm_exec "$cube_command template-create" 2>&1 | tee "$OUTPUT_DIR/create.log"
+template_id=$(pvm_vm_exec "python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"job\"][\"template_id\"])' $remote_q/logs/template-submit.json")
+[[ $template_id =~ ^[A-Za-z0-9_-]+$ ]] || { echo "invalid template ID" >&2; exit 1; }
+printf '%s\n' "$template_id" > "$OUTPUT_DIR/template-id"
+
+# Recreate QEMU as well, so restore crosses a new outer KVM clock epoch.
+pvm_vm_exec 'systemctl poweroff --no-block' || true
+printf -v name_q '%q' "$PVM_VM_NAME"
+pvm_host_exec "env PVM_WAIT_VM_NAME=$name_q bash -s" <<'BASH'
+set -euo pipefail
+deadline=$((SECONDS + 300))
+while (( SECONDS < deadline )); do
+  if ! ps -eo args= | awk -v name="$PVM_WAIT_VM_NAME" '
+    $1 ~ /(^|\/)(qemu-system-x86_64|qemu-kvm)$/ {
+      for (i = 1; i < NF; i++)
+        if ($i == "-name" && $(i + 1) == name) found = 1
+    }
+    END { exit !found }'; then
+    exit 0
+  fi
+  sleep 2
+done
+echo "VM did not power off" >&2
+exit 1
+BASH
+pvm_vm_ensure "$ROOT_DIR"
+timeout=${PVM_REBOOT_READY_TIMEOUT:-600}
+[[ $timeout =~ ^[0-9]+$ ]] || { echo "invalid reboot timeout" >&2; exit 2; }
+deadline=$((SECONDS + timeout))
+boot_after=
+while (( SECONDS < deadline )); do
+  candidate=$(pvm_vm_exec "test \"\$(uname -r)\" = '$PIN_KERNEL' && mountpoint -q /build && cat /proc/sys/kernel/random/boot_id" 2>/dev/null) || candidate=
+  if [[ -n $candidate && $candidate != "$boot_before" ]]; then
+    if pvm_vm_exec 'for unit in cube-sandbox-s3lvol.service cube-sandbox-cubelet.service cube-sandbox-cube-egress.service; do systemctl is-active --quiet "$unit" || exit 1; done; test -S /var/run/s3lvol.sock && curl -fsS http://127.0.0.1:3000/health >/dev/null' >/dev/null 2>&1; then
+      boot_after=$candidate
+      break
+    fi
+  fi
+  sleep 4
+done
+[[ -n $boot_after ]] || { echo "VM or CubeSandbox did not recover after reboot" >&2; exit 1; }
+printf '%s\n' "$boot_after" > "$OUTPUT_DIR/boot-after"
+pvm_vm_exec "$cube_command restore '$template_id'" 2>&1 | tee "$OUTPUT_DIR/restore.log"
+pvm_vm_exec "tar -C $remote_q -cf - logs" > "$OUTPUT_DIR/cube-logs.tar"
+pvm_vm_exec "/usr/local/services/cubetoolbox/CubeMaster/bin/cubemastercli template delete --template-id '$template_id'" \
+  > "$OUTPUT_DIR/cleanup.log" 2>&1
+printf 'kernel=%s\ntemplate_id=%s\nboot_before=%s\nboot_after=%s\nresult=PASS\n' \
+  "$PIN_KERNEL" "$template_id" "$boot_before" "$boot_after" > "$OUTPUT_DIR/result.env"
+printf 'PVM_REBOOT_RESTORE=PASS template=%s output=%s\n' "$template_id" "$OUTPUT_DIR"

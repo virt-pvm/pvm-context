@@ -114,6 +114,15 @@ It then waits for the pinned kernel and shared mount before running
 with mismatched disks or port is rejected rather than restarted. Image
 creation and destructive CubeS3lvol cleanup remain separate, explicit tasks.
 
+For persisted-template qualification, reboot the VM and restore the exact
+template created before reboot:
+
+```bash
+./scripts/pvm-test ubuntu-24.04/6.8.0-139 --reboot-restore --env /path/to/targets.env
+```
+
+See `docs/self-hosted-ci.md` for image migration and runner deployment.
+
 Keep the SSH host, guest credentials, VM name, root and shared disk paths,
 optional seed ISO, QEMU path, CPU/memory sizing, and sudo policy in an ignored
 `configs/targets.local.env` (see the example). The tracked startup logic is

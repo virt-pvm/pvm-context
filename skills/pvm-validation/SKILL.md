@@ -11,7 +11,7 @@ custom 6.6/6.12 host development workflow, not native distro RPM validation.
 
 Use `scripts/pvm-build <distribution/kernel> --build-only --env <vm-env>`
 to build on an already prepared VM. For an existing guest-side RPM, use
-`scripts/pvm-test <distribution/kernel> --env <vm-env> --test-only --rpm <guest-rpm-path>`.
+`scripts/pvm-test <distribution/kernel> --env <vm-env> --reboot-restore --test-only --rpm <guest-rpm-path>`.
 Omit `--test-only --rpm ...` to build and test on that VM. First regenerate
 the pinned prepared source when building; metadata checks alone do not prove
 an old working tree is unmodified. Verify the target kernel, compiler and BTF
@@ -25,7 +25,11 @@ never modify a backing disk or discard existing user disks as a repair.
 
 Runtime validation covers module load/BTF, Firecracker, Kata runtime-rs with
 QEMU/Dragonball/Cloud Hypervisor, and CubeSandbox template creation/restore.
-Require zero exit status and `PVM_FULL_TEST=PASS` for these gates. Build-only,
+Complete qualification also requires stopping and recreating the outer VM
+with the same writable disks and restoring the same template. Read
+`docs/self-hosted-ci.md` for this gate. Require zero exit status and both
+`PVM_FULL_TEST=PASS` and `PVM_REBOOT_RESTORE=PASS` in the same run.
+`PVM_FULL_TEST=PASS` alone does not include cross-reboot restore. Build-only,
 `--module-only` and individual runtime scripts are partial checks. Distinguish
 VM/assets, source-pin, compiler/BTF, module-load and runtime failures. Keep
 results outside tracked manifests and report failed or partial gates explicitly.
