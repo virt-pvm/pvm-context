@@ -10,6 +10,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -260,29 +261,90 @@ def notes(manifest):
     return '\n'.join(lines) + '\n'
 
 
-def build(plan, workspace, env_dir):
+def copy_context(destination):
+    tracked = git(ROOT, 'ls-files', '-z').decode().split('\0')
+    for name in filter(None, tracked):
+        dest = destination / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(ROOT / name), str(dest))
+
+
+def prepare_inputs(plan, output):
+    """Run on a hosted runner; the validation host needs no GitHub Git access."""
+    if git(ROOT, 'rev-parse', 'HEAD').decode().strip() != plan['context_commit']:
+        raise ValueError('checkout does not match release context commit')
+    output.mkdir(parents=True, exist_ok=False)
+    git(ROOT, 'bundle', 'create', str(output / 'context.bundle'), 'HEAD')
+    with tempfile.TemporaryDirectory() as directory:
+        temporary = Path(directory)
+        context, repo = temporary / 'context', temporary / 'linux.git'
+        copy_context(context)
+        subprocess.check_call(['git', 'init', '--bare', str(repo)])
+        for source in plan['sources'].values():
+            fetch(repo, source['commit'])
+        targets = sorted(str(p.parent.relative_to(context / 'targets'))
+                         for p in (context / 'targets').glob('*/*/manifest.txt'))
+        if not targets:
+            raise ValueError('no release targets')
+        prepared = [update_target(context, repo, target, plan['sources']) for target in targets]
+        for target in targets:
+            tag = target.replace('/', '-')
+            subprocess.check_call(['python3', str(context / 'tools/export-oot-source.py'), target,
+                                   '--context', str(context), '--repo', str(repo),
+                                   '--output', str(output / 'bundles' / (tag + '.tar.gz'))])
+        shutil.copytree(str(context / 'targets'), str(output / 'targets'))
+    write_json(output / 'release-plan.json', plan)
+    write_json(output / 'inputs.json', {
+        'plan': plan, 'targets': prepared,
+        'files': {p.relative_to(output).as_posix(): digest(p)
+                  for p in sorted(output.rglob('*')) if p.is_file()}})
+
+
+def verify_inputs(directory, plan):
+    metadata = json.loads((directory / 'inputs.json').read_text())
+    if metadata['plan'] != plan:
+        raise ValueError('source inputs do not match frozen release plan')
+    actual = {p.relative_to(directory).as_posix() for p in directory.rglob('*')
+              if p.is_file() or p.is_symlink()} - {'inputs.json'}
+    if actual != set(metadata['files']):
+        raise ValueError('source input file set mismatch')
+    for name, expected in metadata['files'].items():
+        path = directory / name
+        if (Path(name).is_absolute() or '..' in Path(name).parts or
+                path.is_symlink() or digest(path) != expected):
+            raise ValueError('source input checksum mismatch')
+    return metadata['targets']
+
+
+def build(plan, workspace, env_dir, inputs=None):
     if git(ROOT, 'rev-parse', 'HEAD').decode().strip() != plan['context_commit']:
         raise ValueError('checkout does not match release context commit')
     # A fresh directory prevents picking up artifacts from old runs or attempts.
     workspace.mkdir(parents=True, exist_ok=False)
     context = workspace / 'context'
-    tracked = git(ROOT, 'ls-files', '-z').decode().split('\0')
-    for name in filter(None, tracked):
-        dest = context / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(ROOT / name), str(dest))
-    repo = workspace / 'linux.git'
-    subprocess.check_call(['git', 'init', '--bare', str(repo)])
-    for source in plan['sources'].values():
-        fetch(repo, source['commit'])
+    copy_context(context)
     targets = sorted(str(p.parent.relative_to(context / 'targets'))
                      for p in (context / 'targets').glob('*/*/manifest.txt'))
     if not targets:
         raise ValueError('no release targets')
-    prepared = [update_target(context, repo, target, plan['sources']) for target in targets]
+    if inputs:
+        prepared = verify_inputs(inputs, plan)
+        if sorted(t['target'] for t in prepared) != targets:
+            raise ValueError('source inputs do not cover release targets')
+        for target in targets:
+            for name in ('manifest.txt', 'config.sh'):
+                shutil.copyfile(str(inputs / 'targets' / target / name),
+                                str(context / 'targets' / target / name))
+        bundles, repo = inputs / 'bundles', None
+    else:
+        repo = workspace / 'linux.git'
+        subprocess.check_call(['git', 'init', '--bare', str(repo)])
+        for source in plan['sources'].values():
+            fetch(repo, source['commit'])
+        prepared = [update_target(context, repo, target, plan['sources']) for target in targets]
+        bundles = workspace / 'bundles'
     assets = workspace / 'assets'
     assets.mkdir()
-    bundles = workspace / 'bundles'
     results = []
     for target in prepared:
         tag = target['target'].replace('/', '-')
@@ -294,7 +356,7 @@ def build(plan, workspace, env_dir):
         wrapper = workspace / (tag + '.env')
         wrapper.write_text('source ' + shlex.quote(str(env.resolve())) + '\n'
                            '[[ ${PVM_FACTORY_HOST:-local} == local ]] || exit 2\n'
-                           'PVM_OOT_REPO=' + shlex.quote(str(repo)) + '\n'
+                           'PVM_OOT_REPO=' + shlex.quote(str(repo) if repo else '') + '\n'
                            'PVM_SOURCE_BUNDLES=' + shlex.quote(str(bundles)) + '\n')
         wrapper.chmod(0o600)
         subprocess.check_call(['bash', str(context / 'scripts/pvm-ci'), 'run',
@@ -312,10 +374,14 @@ def main():
     sub = parser.add_subparsers(dest='command')
     freeze = sub.add_parser('snapshot')
     freeze.add_argument('--output', type=Path, required=True)
+    stage = sub.add_parser('inputs')
+    stage.add_argument('--plan', type=Path, required=True)
+    stage.add_argument('--output', type=Path, required=True)
     run = sub.add_parser('build')
     run.add_argument('--plan', type=Path, required=True)
     run.add_argument('--workspace', type=Path, required=True)
     run.add_argument('--env-dir', type=Path, required=True)
+    run.add_argument('--inputs', type=Path)
     args = parser.parse_args()
     if not args.command:
         parser.error('a subcommand is required')
@@ -326,8 +392,11 @@ def main():
         write_json(args.output, result)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             stream.write('tag=' + result['tag'] + '\n')
+    elif args.command == 'inputs':
+        prepare_inputs(json.loads(args.plan.read_text()), args.output.resolve())
     else:
-        build(json.loads(args.plan.read_text()), args.workspace, args.env_dir)
+        build(json.loads(args.plan.read_text()), args.workspace, args.env_dir,
+              args.inputs.resolve() if args.inputs else None)
 
 
 if __name__ == '__main__':

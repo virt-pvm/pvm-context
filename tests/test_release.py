@@ -130,6 +130,69 @@ class ReleaseHistory(unittest.TestCase):
 
 
 class TargetInputs(unittest.TestCase):
+    def test_input_checksums_bind_plan_and_exact_file_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = {'context_commit': A}
+            (root / 'context.bundle').write_bytes(b'fixture')
+            release.write_json(root / 'inputs.json', {
+                'plan': plan, 'targets': [{'target': 'fixture/6.6'}],
+                'files': {'context.bundle': release.digest(root / 'context.bundle')}})
+            self.assertEqual(release.verify_inputs(root, plan), [{'target': 'fixture/6.6'}])
+            with self.assertRaises(ValueError):
+                release.verify_inputs(root, {'context_commit': B})
+            (root / 'context.bundle').write_bytes(b'changed')
+            with self.assertRaises(ValueError):
+                release.verify_inputs(root, plan)
+
+    def test_unlisted_input_files_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release.write_json(root / 'inputs.json', {'plan': {}, 'targets': [], 'files': {}})
+            (root / 'unexpected.env').write_text('private')
+            with self.assertRaises(ValueError):
+                release.verify_inputs(root, {})
+
+    def test_input_path_escape_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release.write_json(root / 'inputs.json', {
+                'plan': {}, 'targets': [], 'files': {'../escape': 'a' * 64}})
+            with self.assertRaises(ValueError):
+                release.verify_inputs(root, {})
+
+    def test_validation_host_uses_prepackaged_sources_without_git_fetch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs, envs = root / 'inputs', root / 'envs'
+            target = 'fixture/6.6'
+            for parent in (inputs, envs):
+                parent.mkdir()
+            source = inputs / 'targets' / target
+            source.mkdir(parents=True)
+            (source / 'manifest.txt').write_text('base_commit=' + A + '\n')
+            (source / 'config.sh').write_text('PVM_BASE_COMMIT=' + A + '\n')
+            (envs / 'fixture-6.6.env').write_text('PVM_FACTORY_HOST=local\n')
+            def copy_context(context):
+                destination = context / 'targets' / target
+                destination.mkdir(parents=True)
+                (destination / 'manifest.txt').write_text('old')
+            record = {'target': target, 'kernel': '6.6-test'}
+            plan = {'context_commit': A, 'sources': {}}
+            with mock.patch.object(release, 'git', return_value=(A + '\n').encode()):
+                with mock.patch.object(release, 'copy_context', side_effect=copy_context):
+                    with mock.patch.object(release, 'verify_inputs', return_value=[record]):
+                        with mock.patch.object(release, 'fetch', side_effect=AssertionError('network fetch')):
+                            with mock.patch.object(release.subprocess, 'check_call') as run:
+                                with mock.patch.object(release, 'collect', return_value=record):
+                                    with mock.patch.object(release, 'notes', return_value='notes'):
+                                        release.build(plan, root / 'work', envs, inputs)
+            self.assertEqual(run.call_count, 1)
+            self.assertIn('scripts/pvm-ci', run.call_args[0][0][1])
+            wrapper = (root / 'work/fixture-6.6.env').read_text()
+            self.assertIn("PVM_OOT_REPO=''", wrapper)
+            self.assertIn(str(inputs / 'bundles'), wrapper)
+
     def test_generated_pins_work_with_existing_source_exporter(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

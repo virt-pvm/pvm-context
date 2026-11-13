@@ -135,6 +135,18 @@ fingerprint mismatches and patch conflicts fail; maintainers must fix the
 profiles in the kernel repository. Release provenance records both the branch
 commit that supplies the profile and the actual pinned source commit.
 
+The hosted snapshot job packages a full context Git bundle and all pinned
+OOT source bundles as one run-scoped artifact. The validation job downloads
+that artifact and checks out the exact context SHA locally, without using
+`actions/checkout` or fetching Linux Git objects over the host's Internet
+connection. Input file checksums and the frozen plan are verified before use;
+the usual guest-side profile and source-fingerprint checks still apply.
+
+Artifact IDs are passed through the producing job's outputs. A failed-job
+retry reuses the successful dependency's exact artifact even when its attempt
+number differs; uploads and private working directories remain attempt-scoped.
+Retrying publication still refuses an existing tag or release.
+
 The protected build job uses `PVM_FACTORY_CONFIG_DIR` and existing sealed
 images on the validation host. It generates a private temporary context and
 target pins, without committing or altering the checked-in manifests. Factory
@@ -161,6 +173,6 @@ unchanged branches are explicit. A missing prior manifest or inaccessible old
 commit fails the release rather than silently dropping history. Release notes
 contain the same summaries. These comparisons describe profile/tooling branch
 history; actual source pins are recorded per target. Linux Git fetches run
-on the validation host; no personal token or SSH deploy key is required for
+on the hosted runner; no personal token or SSH deploy key is required for
 that public repository. The validation host still needs connectivity to
 GitHub Actions and artifact storage.

@@ -25,23 +25,28 @@ jobs:
   snapshot:
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     outputs:
       tag: ${{ steps.freeze.outputs.tag }}
+      inputs_artifact_id: ${{ steps.upload_inputs.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - id: freeze
         name: Freeze both branch tips and previous release history
         env:
           GH_TOKEN: ${{ github.token }}
           PVM_RELEASE_TAG: ${{ inputs.release_tag }}
         run: python3 tools/pvm-release.py snapshot --output release-plan.json
-      - uses: actions/upload-artifact@v4
+      - name: Package frozen context and OOT inputs for the validation host
+        run: python3 tools/pvm-release.py inputs --plan release-plan.json --output release-inputs
+      - id: upload_inputs
+        uses: actions/upload-artifact@v4
         with:
-          name: release-plan-${{ github.run_id }}-${{ github.run_attempt }}
-          path: release-plan.json
+          name: release-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-inputs/
           if-no-files-found: error
           retention-days: 14
   build:
@@ -52,21 +57,24 @@ jobs:
     outputs:
       assets_artifact_id: ${{ steps.upload_assets.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: release-plan-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .artifacts/release-plan
+          artifact-ids: ${{ needs.snapshot.outputs.inputs_artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/pvm-release-inputs-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Build and fully qualify all distributions
         env:
           PVM_FACTORY_CONFIG_DIR: ${{ vars.PVM_FACTORY_CONFIG_DIR }}
           RELEASE_WORKSPACE: ${{ runner.temp }}/pvm-release-${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_INPUTS: ${{ runner.temp }}/pvm-release-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_CONTROLLER: ${{ runner.temp }}/pvm-release-controller-${{ github.run_id }}-${{ github.run_attempt }}
+          CONTEXT_SHA: ${{ github.sha }}
         run: |
           test -n "$PVM_FACTORY_CONFIG_DIR"
-          python3 tools/pvm-release.py build \
-            --plan .artifacts/release-plan/release-plan.json \
+          git clone --no-checkout "$RELEASE_INPUTS/context.bundle" "$RELEASE_CONTROLLER"
+          git -C "$RELEASE_CONTROLLER" checkout --detach "$CONTEXT_SHA"
+          python3 "$RELEASE_CONTROLLER/tools/pvm-release.py" build \
+            --plan "$RELEASE_INPUTS/release-plan.json" --inputs "$RELEASE_INPUTS" \
             --workspace "$RELEASE_WORKSPACE" --env-dir "$PVM_FACTORY_CONFIG_DIR"
       - id: upload_assets
         uses: actions/upload-artifact@v4
