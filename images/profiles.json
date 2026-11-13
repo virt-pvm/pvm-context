@@ -1,0 +1,41 @@
+{
+  "ubuntu-24.04": {
+    "family": "ubuntu", "user": "pvm", "compiler": "x86_64-linux-gnu-gcc-13",
+    "image_url": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
+    "checksums_url": "https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS",
+    "packages": ["gcc-13", "g++-13"], "kernel_support_packages": ["linux-modules-extra-{kernel}"], "kernel_package": "linux-image-{kernel}",
+    "headers_package": "linux-headers-{kernel}"
+  },
+  "ubuntu-26.04": {
+    "family": "ubuntu", "user": "pvm", "compiler": "x86_64-linux-gnu-gcc",
+    "image_url": "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img",
+    "checksums_url": "https://cloud-images.ubuntu.com/releases/26.04/release/SHA256SUMS",
+    "packages": ["gcc", "g++"], "kernel_support_packages": [], "kernel_package": "linux-image-{kernel}",
+    "headers_package": "linux-headers-{kernel}"
+  },
+  "centos-stream-10": {
+    "family": "rpm", "user": "pvm", "compiler": "gcc",
+    "image_url": "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-20261021.0.x86_64.qcow2",
+    "checksums_url": "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-20261021.0.x86_64.qcow2.SHA256SUM",
+    "packages": [], "kernel_package": "kernel-{kernel}", "headers_package": "kernel-devel-{kernel}"
+  },
+  "amazon-linux-2023": {
+    "family": "rpm", "user": "pvm", "compiler": "gcc",
+    "image_url": "https://cdn.amazonlinux.com/al2023/os-images/2023.12.20261016.0/kvm/al2023-kvm-2023.12.20261016.0-kernel-6.1-x86_64.xfs.gpt.qcow2",
+    "image_sha256": "b6174d02ae88732e0b596ed1cf840c0e5f2f492b8d539bb9255c70f92c3624a8",
+    "packages": ["python3.11", "nftables", "runc"],
+    "kernel_package": "kernel6.18-{kernel}", "headers_package": "kernel6.18-devel-{kernel}"
+  },
+  "alinux-4": {
+    "family": "rpm", "user": "pvm", "compiler": "gcc",
+    "image_url": "https://alinux4.oss-cn-beijing.aliyuncs.com/images/aliyun_4_x64_20G_nocloud_alibase_20260901.qcow2",
+    "checksums_url": "https://alinux4.oss-cn-beijing.aliyuncs.com/images/ALINUX4-SHA256SUM-20260901",
+    "packages": [], "kernel_package": "kernel-{kernel}", "headers_package": "kernel-devel-{kernel}"
+  },
+  "opencloudos-9.4": {
+    "family": "rpm", "user": "pvm", "compiler": "gcc",
+    "image_url": "https://mirrors.opencloudos.tech/opencloudos/9.4/images/qcow2/x86_64/OpenCloudOS-GenericCloud-9.4-20260325.0.x86_64.qcow2",
+    "checksums_url": "https://mirrors.opencloudos.tech/opencloudos/9.4/images/qcow2/x86_64/OpenCloudOS-GenericCloud-9.4-20260325.0.x86_64.qcow2.sha256",
+    "packages": [], "kernel_package": "kernel-{kernel}", "headers_package": "kernel-devel-{kernel}"
+  }
+}

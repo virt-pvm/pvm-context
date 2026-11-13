@@ -1,0 +1,17 @@
+{
+  "kernel_rpms": [
+    "https://kojihub.stream.centos.org/kojifiles/packages/kernel/{version}/{release}/{arch}/kernel-{kernel}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/kernel/{version}/{release}/{arch}/kernel-core-{kernel}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/kernel/{version}/{release}/{arch}/kernel-modules-core-{kernel}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/kernel/{version}/{release}/{arch}/kernel-modules-{kernel}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/kernel/{version}/{release}/{arch}/kernel-modules-extra-{kernel}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/kernel/{version}/{release}/{arch}/kernel-devel-{kernel}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/gcc-14.4.1-3.el10.{arch}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/cpp-14.4.1-3.el10.{arch}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/gcc-c++-14.4.1-3.el10.{arch}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/libgcc-14.4.1-3.el10.{arch}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/libgomp-14.4.1-3.el10.{arch}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/libstdc++-14.4.1-3.el10.{arch}.rpm",
+    "https://kojihub.stream.centos.org/kojifiles/packages/gcc/14.4.1/3.el10/{arch}/libstdc++-devel-14.4.1-3.el10.{arch}.rpm"
+  ]
+}

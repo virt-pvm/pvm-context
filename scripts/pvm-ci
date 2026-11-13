@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+[[ ( $# == 4 || $# == 5 ) && $3 == --env ]] || {
+  echo "usage: $0 <prepare|run|all> <distribution/kernel> --env factory.env [--force]" >&2
+  exit 2
+}
+mode=$1 target=$2
+[[ $mode == prepare || $mode == run || $mode == all ]] || exit 2
+force_prepare=0
+if [[ $# == 5 ]]; then
+  [[ $mode == prepare && $5 == --force ]] || {
+    echo '--force is supported only by prepare' >&2; exit 2;
+  }
+  force_prepare=1
+fi
+[[ $target =~ ^[a-z0-9.-]+/[a-zA-Z0-9._-]+$ ]] || exit 2
+[[ -f $4 ]] || { echo "factory env not found" >&2; exit 2; }
+set -a
+source "$4"
+set +a
+export PVM_FORCE_PREPARE=$force_prepare
+if [[ -n ${PVM_FACTORY_HOST:-} && $PVM_FACTORY_HOST != local ]]; then
+  : "${PVM_FACTORY_CONTEXT:?path to deployed checkout on validation host}"
+  : "${PVM_FACTORY_ENV:?path to private env on validation host}"
+  printf -v command '%q/scripts/pvm-ci %q %q --env %q' \
+    "$PVM_FACTORY_CONTEXT" "$mode" "$target" "$PVM_FACTORY_ENV"
+  [[ $force_prepare == 0 ]] || command+=' --force'
+  status=0
+  ssh -T -o ServerAliveInterval=20 -o ServerAliveCountMax=15 "$PVM_FACTORY_HOST" "$command" || status=$?
+  if [[ $mode != prepare ]]; then
+    tag=${target//\//-}
+    mkdir -p "$ROOT_DIR/.artifacts/pipeline/$tag"
+    # Only public build/test artifacts return to the controller, never disks,
+    # machine env files or factory keys.
+    rsync -a --protect-args \
+      "$PVM_FACTORY_HOST:$PVM_FACTORY_CONTEXT/.artifacts/pipeline/$tag/" \
+      "$ROOT_DIR/.artifacts/pipeline/$tag/" || { [[ $status != 0 ]] || status=1; }
+  fi
+  exit "$status"
+fi
+exec python3 -u "$ROOT_DIR/tools/pvm-pipeline.py" "$mode" "$target"

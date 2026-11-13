@@ -1,0 +1,13 @@
+{
+  "compiler_packages": [
+    "gcc-12.3.1.8-8.oc9",
+    "gcc-c++-12.3.1.8-8.oc9"
+  ],
+  "packages": [
+    "cpp-12.3.1.8-8.oc9",
+    "libgcc-12.3.1.8-8.oc9",
+    "libgomp-12.3.1.8-8.oc9",
+    "libstdc++-12.3.1.8-8.oc9",
+    "libstdc++-devel-12.3.1.8-8.oc9"
+  ]
+}
